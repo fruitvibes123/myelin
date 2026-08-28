@@ -1,0 +1,58 @@
+[package]
+name = "myelin"
+version = "0.1.0"
+edition = "2024"
+
+
+rust-version = "1.88"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "The shared confinement + agent-loop substrate behind its host applications: ConfinedPath/openat2, caps, the read-only tool set, config, TLS, and the loop's tool/context phase with the terminal seam abstracted — the confinement core its host applications link instead of re-implementing."
+
+
+
+
+[dependencies]
+
+
+
+
+
+creatine = { git = "https://github.com/fruitvibes123/creatine", rev = "29b95fd41282ce75c5b32ef9a78dacc55f73b51e", optional = true }
+globset = "0.4"
+regex = "1"
+rustix = { version = "1", features = ["fs"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"], optional = true }
+rustls-pki-types = { version = "1", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+
+
+
+ureq = { version = "=3.3.0", default-features = false, features = ["rustls", "json"], optional = true }
+x509-parser = { version = "0.16", optional = true }
+
+[features]
+
+
+
+
+
+
+
+
+
+
+
+default = ["net"]
+net = ["dep:ureq", "dep:rustls", "dep:rustls-pki-types", "dep:x509-parser"]
+
+
+
+creatine-inprocess = ["dep:creatine"]
+
+[dev-dependencies]
+rcgen = "0.14"
+tempfile = "3"
