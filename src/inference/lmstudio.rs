@@ -436,16 +436,14 @@ fn parse_completion(text: &str) -> Result<ChatResponse, InferError> {
             });
         }
     }
-                                                                                     
-                                                                                    
-    let length_capped = v["choices"]
+    let finish_reason = v["choices"]
         .get(0)
         .and_then(|c| c["finish_reason"].as_str())
-        == Some("length");
+        .map(str::to_string);
     Ok(ChatResponse {
         content,
         tool_calls,
-        length_capped,
+        finish_reason,
     })
 }
 
@@ -509,22 +507,154 @@ mod tests {
         let r = parse_completion(raw).unwrap();
         assert_eq!(r.content.as_deref(), Some("all done"));
         assert!(r.tool_calls.is_empty());
-                                                  
-        assert!(!r.length_capped);
+        assert!(!r.length_capped());
     }
 
     #[test]
     fn length_finish_reason_sets_length_capped() {
-                                                                                  
-                                                                               
         let raw = r#"{ "choices": [{ "finish_reason": "length", "message": { "content": "partial" } }] }"#;
         let r = parse_completion(raw).unwrap();
         assert_eq!(r.content.as_deref(), Some("partial"));
-        assert!(r.length_capped);
-                                   
+        assert!(r.length_capped());
         let raw2 =
             r#"{ "choices": [{ "finish_reason": "stop", "message": { "content": "done" } }] }"#;
-        assert!(!parse_completion(raw2).unwrap().length_capped);
+        assert!(!parse_completion(raw2).unwrap().length_capped());
+    }
+
+    #[test]
+    fn finish_reason_is_carried_verbatim_and_absent_when_missing() {
+        let raw = r#"{ "choices": [{ "finish_reason": "context_length", "message": { "content": "x" } }] }"#;
+        let r = parse_completion(raw).unwrap();
+        assert_eq!(r.finish_reason.as_deref(), Some("context_length"));
+        assert!(!r.length_capped());
+        let raw = r#"{ "choices": [{ "message": { "content": "x" } }] }"#;
+        let r = parse_completion(raw).unwrap();
+        assert_eq!(r.finish_reason, None);
+    }
+
+    #[test]
+    fn a_non_string_finish_reason_is_none_and_an_empty_string_is_carried() {
+        for v in [
+            json!(null),
+            json!(3),
+            json!({ "a": 1 }),
+            json!(["length"]),
+            json!(true),
+        ] {
+            let raw =
+                json!({ "choices": [{ "finish_reason": v.clone(), "message": { "content": "x" } }] })
+                    .to_string();
+            let r = parse_completion(&raw).unwrap();
+            assert_eq!(
+                r.content.as_deref(),
+                Some("x"),
+                "reached the parsed completion for {v}"
+            );
+            assert_eq!(r.finish_reason, None, "carried for {v}");
+            assert!(!r.length_capped(), "predicate at {v}");
+        }
+
+        let raw = json!({ "choices": [{ "finish_reason": "", "message": { "content": "x" } }] })
+            .to_string();
+        let r = parse_completion(&raw).unwrap();
+        assert_eq!(
+            r.content.as_deref(),
+            Some("x"),
+            "reached the parsed completion for the empty string"
+        );
+        assert_eq!(
+            r.finish_reason.as_deref(),
+            Some(""),
+            "carried for the empty string"
+        );
+        assert!(!r.length_capped(), "predicate at the empty string");
+    }
+
+                                                                                              
+                                                                                            
+    const BACKEND_FINISH_REASONS: [&str; 9] = [
+        "stop",
+        "tool_calls",
+        "length",
+        "context_length",
+        "wall_clock",
+        "capacity",
+        "body_bytes",
+        "memory_pressure",
+        "  Stop_Reason ü  ",
+    ];
+
+    #[test]
+    fn chat_carries_each_backend_finish_reason_verbatim_over_a_loopback_server() {
+        let bodies: Vec<String> = BACKEND_FINISH_REASONS
+            .iter()
+            .map(|r| {
+                json!({ "choices": [{ "finish_reason": r, "message": { "content": "x" } }] })
+                    .to_string()
+            })
+            .collect();
+        let (port, server) = replaying_http(bodies);
+        let ep = Endpoint::parse(&format!("http://127.0.0.1:{port}/v1")).unwrap();
+        let inf = LmStudioInference::new(&ep, None, "m".into()).unwrap();
+        for r in BACKEND_FINISH_REASONS {
+            let resp = inf.chat(&[ChatMsg::User("hi".into())], &[]).unwrap();
+            assert_eq!(
+                resp.content.as_deref(),
+                Some("x"),
+                "reached the parsed completion for {r:?}"
+            );
+            assert_eq!(resp.finish_reason.as_deref(), Some(r), "carried for {r:?}");
+            assert_eq!(resp.length_capped(), r == "length", "predicate at {r:?}");
+        }
+        server.join().unwrap();
+    }
+
+                                                                                       
+                                                                                     
+    fn replaying_http(bodies: Vec<String>) -> (u16, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            for body in bodies {
+                let (mut sock, _) = listener.accept().unwrap();
+                let mut buf: Vec<u8> = Vec::new();
+                let head_end = loop {
+                    let mut chunk = [0u8; 1024];
+                    let n = sock.read(&mut chunk).unwrap();
+                    assert!(n > 0, "closed before the request head ended");
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break i + 4;
+                    }
+                };
+                let head = std::str::from_utf8(&buf[..head_end]).unwrap().to_string();
+                let len: usize = head
+                    .lines()
+                    .find_map(|l| {
+                        let low = l.to_ascii_lowercase();
+                        low.strip_prefix("content-length:")
+                            .map(|v| v.trim().to_string())
+                    })
+                    .expect("the request carried no content-length")
+                    .parse()
+                    .unwrap();
+                while buf.len() < head_end + len {
+                    let mut chunk = [0u8; 1024];
+                    let n = sock.read(&mut chunk).unwrap();
+                    assert!(n > 0, "closed mid-body");
+                    buf.extend_from_slice(&chunk[..n]);
+                }
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                sock.write_all(resp.as_bytes()).unwrap();
+            }
+        });
+        (port, handle)
     }
 
                                                           

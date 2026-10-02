@@ -37,7 +37,7 @@ impl Inference for Recorder {
         Ok(ChatResponse {
             content: None,
             tool_calls,
-            length_capped: false,
+            finish_reason: None,
         })
     }
 }

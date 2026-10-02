@@ -72,15 +72,15 @@ impl SpkiPin {
                 _ => None,
             }
         }
-        let bytes = s.trim().as_bytes();
-        if bytes.len() != 64 {
-            return Err(TlsError::BadPin);
-        }
+        let bytes: &[u8; 64] = s
+            .trim()
+            .as_bytes()
+            .try_into()
+            .map_err(|_| TlsError::BadPin)?;
         let mut out = [0u8; 32];
-        for (i, pair) in bytes.chunks_exact(2).enumerate() {
-            let (hi, lo) = (hexval(pair[0]), hexval(pair[1]));
-            match (hi, lo) {
-                (Some(h), Some(l)) => out[i] = (h << 4) | l,
+        for (o, &[hi, lo]) in out.iter_mut().zip(bytes.as_chunks::<2>().0) {
+            match (hexval(hi), hexval(lo)) {
+                (Some(h), Some(l)) => *o = (h << 4) | l,
                 _ => return Err(TlsError::BadPin),
             }
         }

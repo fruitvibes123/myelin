@@ -82,6 +82,42 @@ fn pin_parses_from_hex_and_rejects_garbage() {
     assert!(SpkiPin::from_hex(&"zz".repeat(32)).is_err());
 }
 
+                                  
+const SHA256_OF_ABC_HEX: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+#[test]
+fn pin_from_hex_decodes_to_the_digest_bytes_in_either_case() {
+    let expected = SpkiPin::of_spki_der(b"abc");
+
+    let lower = SpkiPin::from_hex(SHA256_OF_ABC_HEX).unwrap();
+    assert_eq!(lower, expected, "lower-case decode");
+
+    let upper = SpkiPin::from_hex(&SHA256_OF_ABC_HEX.to_ascii_uppercase()).unwrap();
+    assert_eq!(upper, expected, "upper-case decode");
+
+    let mut one_nibble_off = SHA256_OF_ABC_HEX.to_string();
+    one_nibble_off.replace_range(63..64, "c");
+    assert_ne!(
+        SpkiPin::from_hex(&one_nibble_off).unwrap(),
+        expected,
+        "a changed last nibble decoded to the same pin"
+    );
+}
+
+#[test]
+fn pin_from_hex_refuses_an_input_that_is_not_64_chars() {
+    assert!(
+        SpkiPin::from_hex(&"a".repeat(64)).is_ok(),
+        "the 64-char control was refused"
+    );
+    for n in [62usize, 63, 65, 66] {
+        assert!(
+            matches!(SpkiPin::from_hex(&"a".repeat(n)), Err(TlsError::BadPin)),
+            "accepted a {n}-char pin"
+        );
+    }
+}
+
 #[test]
 fn cert_extraction_matches_rcgen_spki() {
     let fx = fixture("model.example");

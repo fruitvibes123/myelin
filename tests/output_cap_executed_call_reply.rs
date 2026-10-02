@@ -32,7 +32,7 @@ impl Inference for OneRead {
                     name: "read_file".into(),
                     arguments: r#"{"path":"secret.txt"}"#.into(),
                 }],
-                length_capped: false,
+                finish_reason: None,
             })
         } else {
             Ok(ChatResponse::done("wrapped up"))

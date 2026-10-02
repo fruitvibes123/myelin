@@ -18,7 +18,7 @@
                                                                               
                                                                                                    
                                                                                  
-                                                                               
+                                                                                       
                                                      
 
 use crate::caps::{CallBudget, CallCaps, SessionBudget, StopReason};
@@ -71,11 +71,9 @@ pub struct LoopOutcome {
                                                                                   
                                                                                   
     pub terminal_turn: bool,
-                                                                                  
-                                                                                 
-                                                                                 
-                                                                                          
-                                       
+                                                               
+                                                                             
+                                  
     pub length_capped: bool,
                                                                                        
                                                                                    
@@ -204,9 +202,8 @@ pub fn run<A: LoopApp>(
         };
 
         if response.tool_calls.is_empty() {
-                                                                                    
-                                                                
-            let this_capped = response.length_capped;
+                                                                                      
+            let this_capped = response.length_capped();
             let text = response.content.unwrap_or_default();
                                                                                  
                                                            
@@ -716,7 +713,7 @@ mod tests {
         let capped = ChatResponse {
             content: Some("partial".into()),
             tool_calls: Vec::new(),
-            length_capped: true,
+            finish_reason: Some("length".into()),
         };
         let c = caps(8);
         let session = SessionBudget::new(&c, 8);

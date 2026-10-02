@@ -34,13 +34,13 @@ impl Inference for Scripted {
             Ok(ChatResponse {
                 content: None,
                 tool_calls: calls,
-                length_capped: false,
+                finish_reason: None,
             })
         } else {
             Ok(ChatResponse {
                 content: Some("done".into()),
                 tool_calls: Vec::new(),
-                length_capped: false,
+                finish_reason: None,
             })
         }
     }

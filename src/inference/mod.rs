@@ -62,21 +62,21 @@ pub struct ToolCallRequest {
 pub struct ChatResponse {
     pub content: Option<String>,
     pub tool_calls: Vec<ToolCallRequest>,
-                                                                                
-                                                               
-                                                                               
-                                                                           
-                                                  
-    pub length_capped: bool,
+                                                                                                        
+    pub finish_reason: Option<String>,
 }
 
 impl ChatResponse {
+    pub fn length_capped(&self) -> bool {
+        self.finish_reason.as_deref() == Some("length")
+    }
+
                                              
     pub fn done(text: &str) -> ChatResponse {
         ChatResponse {
             content: Some(text.to_string()),
             tool_calls: Vec::new(),
-            length_capped: false,
+            finish_reason: None,
         }
     }
 
@@ -89,7 +89,7 @@ impl ChatResponse {
                 name: name.to_string(),
                 arguments: arguments.to_string(),
             }],
-            length_capped: false,
+            finish_reason: None,
         }
     }
 }

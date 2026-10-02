@@ -5,7 +5,7 @@
                                                                                                   
                                                                     
                                                                                                       
-                                                                                                    
+                                                                    
                                                                                               
                                                                                                         
                                                                                    
@@ -70,12 +70,8 @@ impl Inference for CreatineEngine<'_> {
         let mut budget = RequestBudget::new(self.caps);
         match self.engine.chat(&req, session, &mut budget) {
             Ok(resp) => translate_response(resp),
-                                                                                                        
-                                                                                                       
-                                                                                                
-                                                                                                         
-                                                                   
-                                                
+                                                                               
+                                                              
             Err(EngineError::Budget(_)) => Err(InferError::Budget),
                                                                                                      
                                                               
@@ -173,7 +169,6 @@ fn translate_response(resp: wire::ChatResponse) -> Result<ChatResponse, InferErr
         .into_iter()
         .next()
         .ok_or(InferError::BadResponse)?;
-    let length_capped = choice.finish_reason == "length";
     let tool_calls = choice
         .message
         .tool_calls
@@ -188,7 +183,7 @@ fn translate_response(resp: wire::ChatResponse) -> Result<ChatResponse, InferErr
     Ok(ChatResponse {
         content: choice.message.content,
         tool_calls,
-        length_capped,
+        finish_reason: Some(choice.finish_reason),
     })
 }
 
@@ -298,13 +293,12 @@ mod tests {
         assert_eq!(out.tool_calls[0].name, "read_file");
         assert_eq!(out.tool_calls[0].id, "c1");
         assert_eq!(out.tool_calls[0].arguments, "{\"path\":\"a\"}");
-        assert!(!out.length_capped);
+        assert!(!out.length_capped());
 
-                                                    
         assert!(
             translate_response(cresp("m", Some("partial"), "length", None))
                 .unwrap()
-                .length_capped
+                .length_capped()
         );
 
                                                                    
@@ -324,6 +318,59 @@ mod tests {
             translate_response(empty),
             Err(InferError::BadResponse)
         ));
+    }
+
+    #[test]
+    fn translate_response_carries_finish_reason_verbatim() {
+        let out = translate_response(cresp("m", Some("x"), "context_length", None)).unwrap();
+        assert_eq!(out.finish_reason.as_deref(), Some("context_length"));
+        assert!(!out.length_capped());
+    }
+
+                                                                                              
+                                                                                            
+    const BACKEND_FINISH_REASONS: [&str; 9] = [
+        "stop",
+        "tool_calls",
+        "length",
+        "context_length",
+        "wall_clock",
+        "capacity",
+        "body_bytes",
+        "memory_pressure",
+        "  Stop_Reason ü  ",
+    ];
+
+                                                                             
+    struct FixedFinish(&'static str);
+    impl Engine for FixedFinish {
+        fn chat(
+            &self,
+            req: &wire::ChatRequest,
+            _session: SessionKey<'_>,
+            _budget: &mut RequestBudget,
+        ) -> Result<wire::ChatResponse, EngineError> {
+            Ok(cresp(&req.model, Some("x"), self.0, None))
+        }
+        fn models(&self) -> Vec<wire::ModelInfo> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn chat_carries_each_backend_finish_reason_verbatim_through_the_adapter() {
+        for r in BACKEND_FINISH_REASONS {
+            let engine = FixedFinish(r);
+            let adapter = CreatineEngine::new(&engine, "m", Some("job".into()), rcaps(100, 10_000));
+            let resp = adapter.chat(&[ChatMsg::User("hi".into())], &[]).unwrap();
+            assert_eq!(
+                resp.content.as_deref(),
+                Some("x"),
+                "reached the translated response for {r:?}"
+            );
+            assert_eq!(resp.finish_reason.as_deref(), Some(r), "carried for {r:?}");
+            assert_eq!(resp.length_capped(), r == "length", "predicate at {r:?}");
+        }
     }
 
     #[test]
